@@ -1,0 +1,27 @@
+version: "3.3"
+services:
+  b-hunters-subrecon:
+    build: ./
+    volumes:
+    - /root/B-Hunter/B-Hunter-main/config/b-hunters.ini:/etc/b-hunters/b-hunters.ini
+    environment:
+      # - CHAOS_KEY=""
+      # - PDCP_API_KEY=""
+      # - BINARYEDGE_TOKEN=""
+      # - FB_APP_ID=""
+      # - FB_APP_SECRET=""
+      # - SPYSE_TOKEN=""
+      # - SECURITY_TRAILS_KEY=""
+      # - C99_KEY=""
+      # - PASSIVETOTAL_KEY=""
+      # - PASSIVETOTAL_SECRET=""
+      # - INTELX_KEY=""
+      # - INTELX_URL=""
+      # - findomain_fb_token=""
+      # - findomain_virustotal_token=""
+      # - findomain_securitytrails_token=""
+      # - VT_API_KEY=""
+      # - SPYSE_API_TOKEN=""
+
+    # env_file:
+    #   - ./.env
