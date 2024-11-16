@@ -9,10 +9,10 @@ import re
 
 class subrecon(BHunters):
     """
-    Subrecon developed by Bormaa
+    B-Hunters Subrecon developed by Bormaa
     """
 
-    identity = "B-Hunters-domain-starter"
+    identity = "B-Hunters-subrecon"
     version = __version__
     persistent = True
     filters = [
@@ -66,6 +66,7 @@ class subrecon(BHunters):
     def process(self, task: Task) -> None:
         domain = task.payload_persistent["domain"]
         scanid = task.payload["scan_id"]
+        scantype = task.payload_persistent["scantype"]
         self.update_task_status(domain,"Started")
 
         try:
@@ -74,40 +75,59 @@ class subrecon(BHunters):
             self.log.info(domain)
             domain = re.sub(r'^https?://', '', domain)
             domain = domain.rstrip('/')
-            result,active=self.scan(domain)
-            db=self.db
-            collection = db["domains"]
+            if scantype == "single":
+                url=self.add_https_if_missing(domain)
+                collection = self.db["domains"]
+                existing_document = collection.find_one({"Domain": domain})
+                if existing_document is None:
+                    new_document = {"Scanid":scanid,"Domain": domain,"Ports":[],"Technology":{},"Vulns":{},"Links":{},"ScanLinks":{},"Paths":[],"Paths403":[],"Screenshot":"","resolve":True,"active":True,"data":{},"status":{"processing":[],"finished":[],"failed":[]}}
+                    collection.insert_one(new_document)
+                    task = Task({"type": "subdomain",
+                                        "stage": "new"})
+                    task.add_payload("data", url)
+                    task.add_payload("subdomain", domain)
+                    task.add_payload("source", "subrecon")
+                    self.send_task(task)
+            else:
+                result,active=self.scan(domain)
+                db=self.db
+                collection = db["domains"]
 
-            for url in result:
-                try:
-                    existing_document = collection.find_one({"Domain": url})
-                    if existing_document is None:
-                        new_document = {"Scanid":scanid,"Domain": url,"Ports":[],"Technology":[],"Vulns":[],"Links":[],"Paths":[],"Paths403":[],"Screenshot":"","resolve":True}
-                        collection.insert_one(new_document)
-
-                        if self.no_resolve_or_local_ip(url) == True:
-                            new_document["resolve"] = False
-                            
-                        task = Task({"type": "subdomain",
-                                    "stage": "takeover"})
-                        task.add_payload("domain", url)
-                        task.add_payload("source", "subrecon")
-                        self.send_task(task)
-
-                except Exception as e:
-                    self.log.error(e)
-            for url in active:
-                if url != "":
+                for url in result:
                     try:
-                        task = Task({"type": "subdomain",
-                                    "stage": "new"})
-                        task.add_payload("data", url)
-                        task.add_payload("source", "subrecon")
-                        self.send_task(task)
+                        existing_document = collection.find_one({"Domain": url})
+                        if existing_document is None:
+                            new_document = {"Scanid":scanid,"Domain": url,"Ports":[],"Technology":{},"Vulns":{},"Links":{},"ScanLinks":{},"Paths":[],"Paths403":[],"Screenshot":"","resolve":True,"active":False,"data":{},"status":{"processing":[],"finished":[],"failed":[]}}
+                            
+                            if self.no_resolve_or_local_ip(url) == True:
+                                new_document["resolve"] = False
+                                
+                            collection.insert_one(new_document)
+                            task = Task({"type": "subdomain",
+                                        "stage": "takeover"})
+                            task.add_payload("domain", url)
+                            task.add_payload("source", "subrecon")
+                            self.send_task(task)
+
                     except Exception as e:
                         self.log.error(e)
+                for url in active:
+                    if url != "":
+                        try:
+                            task = Task({"type": "subdomain",
+                                        "stage": "new"})
+                            task.add_payload("data", url)
+                            task.add_payload("subdomain", url)
+                            task.add_payload("source", "subrecon")
+                            self.send_task(task)
+                            domain = re.sub(r'^https?://', '', url)
+                            domain = domain.rstrip('/')
 
-            self.update_task_status(domain,"Finished")
+                            collection.update_one({"Domain": domain}, {"$set": {"active": True}})
+                        except Exception as e:
+                            self.log.error(e)
+
+                self.update_task_status(domain,"Finished")
 
         except Exception as e:
             self.update_task_status(domain,"Failed")

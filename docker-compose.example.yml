@@ -3,7 +3,7 @@ services:
   b-hunters-subrecon:
     build: ./
     volumes:
-    - /root/B-Hunter/B-Hunter-main/config/b-hunters.ini:/etc/b-hunters/b-hunters.ini
+    - ./b-hunters.ini:/etc/b-hunters/b-hunters.ini
     environment:
       # - CHAOS_KEY=""
       # - PDCP_API_KEY=""
