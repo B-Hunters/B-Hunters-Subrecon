@@ -114,16 +114,22 @@ class subrecon(BHunters):
                 for url in active:
                     if url != "":
                         try:
-                            task = Task({"type": "subdomain",
-                                        "stage": "new"})
-                            task.add_payload("data", url)
-                            task.add_payload("subdomain", url)
-                            task.add_payload("source", "subrecon")
-                            self.send_task(task)
                             domain = re.sub(r'^https?://', '', url)
                             domain = domain.rstrip('/')
 
-                            collection.update_one({"Domain": domain}, {"$set": {"active": True}})
+                            existing_document = collection.find_one({"Domain": domain})
+                            if existing_document is None:
+
+                                task = Task({"type": "subdomain",
+                                            "stage": "new"})
+                                task.add_payload("data", url)
+                                task.add_payload("subdomain", url)
+                                task.add_payload("source", "subrecon")
+                                self.send_task(task)
+                                domain = re.sub(r'^https?://', '', url)
+                                domain = domain.rstrip('/')
+
+                                collection.update_one({"Domain": domain}, {"$set": {"active": True}})
                         except Exception as e:
                             self.log.error(e)
 
