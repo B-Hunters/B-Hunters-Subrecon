@@ -111,14 +111,16 @@ class subrecon(BHunters):
                             self.send_task(task)
 
                     except Exception as e:
+                        self.log.error("error happened ")
                         self.log.error(e)
+                        # raise Exception(e)
                 for url in active:
                     if url != "":
                         try:
                             domain = re.sub(r'^https?://', '', url)
                             domain = domain.rstrip('/')
 
-                            existing_document = collection.find_one({"Domain": domain})
+                            existing_document = collection.find_one({"Domain": domain,"active":True})
                             if existing_document is None:
 
                                 task = Task({"type": "subdomain",
@@ -133,6 +135,7 @@ class subrecon(BHunters):
                                 collection.update_one({"Domain": domain}, {"$set": {"active": True}})
                         except Exception as e:
                             self.log.error(e)
+                            # raise Exception(e)
 
                 self.update_task_status(domain,"Finished")
 

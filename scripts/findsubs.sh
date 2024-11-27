@@ -6,7 +6,7 @@ vita -d $domain > $targetfolder/vita.txt
 findomain -t $domain -u $targetfolder/findomain.txt
 python3 /tools/Sublist3r/sublist3r.py -d $domain  -o $targetfolder/sublist3r.txt
 assetfinder $domain | grep  $domain | sort -u | tee -a $targetfolder/assetfinder.txt
-if [ -z ${PDCP_API_KEY+x} ]; then
+if [ -z "${PDCP_API_KEY}" ] || [ ${#PDCP_API_KEY} -lt 5  ]; then
     echo "PDCP_API_KEY environment variable is not set"
 else
     chaos -d $domain -silent -o $targetfolder/chaos.txt
