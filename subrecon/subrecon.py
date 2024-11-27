@@ -54,6 +54,7 @@ class subrecon(BHunters):
 
         except Exception as e:
             print("error ",e)
+            raise Exception(e)
             # result=[]
         return result,active
                     
@@ -137,6 +138,7 @@ class subrecon(BHunters):
 
         except Exception as e:
             self.update_task_status(domain,"Failed")
-
+            
             self.log.error(e)
-            raise Exception("Error happened while processing")
+            # raise Exception("Error happened while processing")
+            raise Exception(e)
