@@ -4,6 +4,7 @@ from .__version__ import __version__
 import subprocess
 import shutil
 import re
+from bson.objectid import ObjectId
 
 
 
@@ -66,7 +67,7 @@ class subrecon(BHunters):
         
     def process(self, task: Task) -> None:
         domain = task.payload_persistent["domain"]
-        scanid = task.payload["scan_id"]
+        scanid = task.payload_persistent["scan_id"]
         scantype = task.payload_persistent["scantype"]
         self.update_task_status(domain,"Started")
 
@@ -78,28 +79,36 @@ class subrecon(BHunters):
             domain = domain.rstrip('/')
             if scantype == "single":
                 url=self.add_https_if_missing(domain)
+                self.waitformongo()
                 collection = self.db["domains"]
-                existing_document = collection.find_one({"Domain": domain})
+                collection2 = self.db["reports"]
+                existing_document = collection.find_one({"Domain": domain,"Scanid":scanid})
                 if existing_document is None:
-                    new_document = {"Scanid":scanid,"Domain": domain,"Ports":[],"Technology":{},"Vulns":{},"Links":{},"ScanLinks":{},"Paths":[],"Paths403":[],"Screenshot":"","resolve":True,"active":True,"data":{},"status":{"processing":[],"finished":[],"failed":[]}}
+                    reports_document = {"Domain": domain,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
+                    reports_document_result = collection2.insert_one(reports_document)
+                    report_id = reports_document_result.inserted_id
+
+                    new_document = {"Scanid":scanid,"Domain": domain,"report_id":ObjectId(report_id),"resolve":True,"active":True,"status":{"processing":[],"finished":[],"failed":[]}}
                     collection.insert_one(new_document)
                     task = Task({"type": "subdomain",
                                         "stage": "new"})
                     task.add_payload("data", url)
                     task.add_payload("subdomain", domain)
+                    task.add_payload("report_id", str(report_id),persistent=True)
                     task.add_payload("source", "subrecon")
                     self.send_task(task)
             else:
                 result,active=self.scan(domain)
+                self.waitformongo()
                 db=self.db
-                collection = db["domains"]
-
+                collection = self.db["domains"]
+                collection2 = self.db["reports"]
                 for url in result:
                     try:
-                        existing_document = collection.find_one({"Domain": url})
+                        existing_document = collection.find_one({"Domain": url,"Scanid":scanid})
                         if existing_document is None:
-                            new_document = {"Scanid":scanid,"Domain": url,"Ports":[],"Technology":{},"Vulns":{},"Links":{},"ScanLinks":{},"Paths":[],"Paths403":[],"Screenshot":"","resolve":True,"active":False,"data":{},"status":{"processing":[],"finished":[],"failed":[]}}
-                            
+                            new_document = {"Scanid":scanid,"Domain": url,"report_id":"","resolve":True,"active":False,"status":{"processing":[],"finished":[],"failed":[]}}
+                            reports_document = {"Domain": url,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
                             if self.no_resolve_or_local_ip(url) == True:
                                 new_document["resolve"] = False
                                 
@@ -119,20 +128,23 @@ class subrecon(BHunters):
                         try:
                             domain = re.sub(r'^https?://', '', url)
                             domain = domain.rstrip('/')
+                            reports_document = {"Domain": domain,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
 
-                            existing_document = collection.find_one({"Domain": domain,"active":True})
+                            existing_document = collection.find_one({"Domain": domain,"Scanid":scanid,"active":True})
                             if existing_document is None:
-
+                                reports_document_result = collection2.insert_one(reports_document)
+                                report_id = reports_document_result.inserted_id
                                 task = Task({"type": "subdomain",
                                             "stage": "new"})
                                 task.add_payload("data", url)
                                 task.add_payload("subdomain", url)
                                 task.add_payload("source", "subrecon")
+                                task.add_payload("report_id", str(report_id),persistent=True)
                                 self.send_task(task)
                                 domain = re.sub(r'^https?://', '', url)
                                 domain = domain.rstrip('/')
+                                collection.update_one({"Domain": domain,"Scanid":scanid}, {"$set": {"active": True,"report_id":ObjectId(report_id)}})
 
-                                collection.update_one({"Domain": domain}, {"$set": {"active": True}})
                         except Exception as e:
                             self.log.error(e)
                             # raise Exception(e)
