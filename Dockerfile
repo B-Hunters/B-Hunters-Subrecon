@@ -1,5 +1,5 @@
 # Build Stage
-FROM ubuntu:latest AS build
+FROM ubuntu@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS build
 
 # Update and install necessary build tools
 RUN apt update && apt install -y \
@@ -36,7 +36,6 @@ RUN git clone https://github.com/aboul3la/Sublist3r.git /tools/Sublist3r
 FROM python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 # Copy Go binaries and tools from the build stage
-COPY --from=build /usr/local/go /usr/local/go
 COPY --from=build /root/go/bin /root/go/bin
 COPY --from=build /tools/vita-0.1.16-x86_64-unknown-linux-musl/vita /usr/bin/vita
 COPY --from=build /tools/findomain /usr/bin/findomain
