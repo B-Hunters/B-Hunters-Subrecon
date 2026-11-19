@@ -64,6 +64,70 @@ class subrecon(BHunters):
         if result !=[]:
             return result,active
         return [],[]
+
+    def host_of(self,url):
+        """The host of a URL, or of a bare host name."""
+        text = re.sub(r'^https?://', '', str(url or ""))
+        text = text.rstrip('/')
+        return text.split('/', 1)[0].split(':', 1)[0].lower()
+
+    def dispatch_discovered(self,result,active,scanid):
+        """Hand every host the discovery found to the rest of the fleet.
+
+        ``result`` is what the discovery tools named and ``active`` is
+        what answered, so the second is the one that is alive.  A host
+        the scan excludes is not handed on at all: the discovery tools
+        find whatever is out there, and the scope is what decides what
+        may be tested.
+
+        Every host gets a report of its own, because that is where the
+        workers write what they find.
+        """
+        collection = self.db["domains"]
+        collection2 = self.db["reports"]
+        for url in result:
+            try:
+                host=self.host_of(url)
+                if not host or self.is_denied_host(host):
+                    continue
+                existing_document = collection.find_one({"Domain": host,"Scanid":scanid})
+                if existing_document is None:
+                    new_document = {"Scanid":scanid,"Domain": host,"report_id":"","resolve":True,"active":False,"status":{"processing":[],"finished":[],"failed":[]}}
+                    reports_document = {"Domain": host,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
+                    if self.no_resolve_or_local_ip(host) == True:
+                        new_document["resolve"] = False
+                    collection.insert_one(new_document)
+                    task = Task({"type": "subdomain",
+                                        "stage": "takeover"})
+                    task.add_payload("domain", host)
+                    task.add_payload("source", "subrecon")
+                    self.send_task(task)
+            except Exception as e:
+                self.log.error("error happened ")
+                self.log.error(e)
+        for url in active:
+            if url == "":
+                continue
+            try:
+                host=self.host_of(url)
+                if not host or self.is_denied_host(host):
+                    continue
+                reports_document = {"Domain": host,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
+                existing_document = collection.find_one({"Domain": host,"Scanid":scanid,"active":True})
+                if existing_document is None:
+                    reports_document_result = collection2.insert_one(reports_document)
+                    report_id = reports_document_result.inserted_id
+                    task = Task({"type": "subdomain",
+                                            "stage": "new"})
+                    task.add_payload("data", url)
+                    task.add_payload("subdomain", host)
+                    task.add_payload("source", "subrecon")
+                    task.add_payload("report_id", str(report_id),persistent=True)
+                    self.send_task(task)
+                    collection.update_one({"Domain": host,"Scanid":scanid}, {"$set": {"active": True,"report_id":ObjectId(report_id)}})
+            except Exception as e:
+                self.log.error(e)
+                # raise Exception(e)
         
     def process(self, task: Task) -> None:
         domain = task.payload_persistent["domain"]
@@ -97,57 +161,20 @@ class subrecon(BHunters):
                     task.add_payload("report_id", str(report_id),persistent=True)
                     task.add_payload("source", "subrecon")
                     self.send_task(task)
+                # The discovery the single path never did.  The platform
+                # asks for a domain, and the whole fleet works from what
+                # is found: without this the scan only ever sees the
+                # host that was named, and the discovery tools that sit
+                # in this image are never run at all.
+                self.log.info("looking for the hosts of %s", domain)
+                result,active=self.scan(domain)
+                self.log.info("the discovery found %d host(s), %d of them answering", len(result or []), len(active or []))
+                self.dispatch_discovered(result,active,scanid)
             else:
                 result,active=self.scan(domain)
                 self.waitformongo()
                 db=self.db
-                collection = self.db["domains"]
-                collection2 = self.db["reports"]
-                for url in result:
-                    try:
-                        existing_document = collection.find_one({"Domain": url,"Scanid":scanid})
-                        if existing_document is None:
-                            new_document = {"Scanid":scanid,"Domain": url,"report_id":"","resolve":True,"active":False,"status":{"processing":[],"finished":[],"failed":[]}}
-                            reports_document = {"Domain": url,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
-                            if self.no_resolve_or_local_ip(url) == True:
-                                new_document["resolve"] = False
-                                
-                            collection.insert_one(new_document)
-                            task = Task({"type": "subdomain",
-                                        "stage": "takeover"})
-                            task.add_payload("domain", url)
-                            task.add_payload("source", "subrecon")
-                            self.send_task(task)
-
-                    except Exception as e:
-                        self.log.error("error happened ")
-                        self.log.error(e)
-                        # raise Exception(e)
-                for url in active:
-                    if url != "":
-                        try:
-                            domain = re.sub(r'^https?://', '', url)
-                            domain = domain.rstrip('/')
-                            reports_document = {"Domain": domain,"Ports":[],"Technology":{},"Vulns":{},"Paths":[],"Paths403":[],"Screenshot":"","data":{}}
-
-                            existing_document = collection.find_one({"Domain": domain,"Scanid":scanid,"active":True})
-                            if existing_document is None:
-                                reports_document_result = collection2.insert_one(reports_document)
-                                report_id = reports_document_result.inserted_id
-                                task = Task({"type": "subdomain",
-                                            "stage": "new"})
-                                task.add_payload("data", url)
-                                task.add_payload("subdomain", url)
-                                task.add_payload("source", "subrecon")
-                                task.add_payload("report_id", str(report_id),persistent=True)
-                                self.send_task(task)
-                                domain = re.sub(r'^https?://', '', url)
-                                domain = domain.rstrip('/')
-                                collection.update_one({"Domain": domain,"Scanid":scanid}, {"$set": {"active": True,"report_id":ObjectId(report_id)}})
-
-                        except Exception as e:
-                            self.log.error(e)
-                            # raise Exception(e)
+                self.dispatch_discovered(result,active,scanid)
 
                 self.update_task_status(domain,"Finished")
 
