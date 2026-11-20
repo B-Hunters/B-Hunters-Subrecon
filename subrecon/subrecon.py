@@ -1,6 +1,7 @@
 from b_hunters.bhunter import BHunters
 from karton.core import Task
 from .__version__ import __version__
+import os
 import subprocess
 import shutil
 import re
@@ -24,17 +25,23 @@ class subrecon(BHunters):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-    def findusbcommand(self,domain):
+    def findusbcommand(self,domain,rate=None,concurrency=None):
         result=[]
         active=[]
         try:
             folder1=self.generate_random_filename()
-            # print(folder1)
-            output=subprocess.run(["/app/findsubs.sh",folder1,domain], capture_output=True, text=True)
+            # The scan's rate and concurrency travel with the task, and
+            # the tool that asks the target about every host it found
+            # answers at that rate.  A tool with its own default rate
+            # is how a scan of a rate-limited edge becomes a block.
+            environment=dict(os.environ)
+            environment["RATE"]=str(rate if rate else 5)
+            environment["CONCURRENCY"]=str(concurrency if concurrency else 3)
+            output=subprocess.run(["/app/findsubs.sh",folder1,domain], capture_output=True, text=True, env=environment)
             # print(output)
             # data=output.stdout.split("\n")
             try:
-                
+
                 # Open the file in read mode
                 with open(folder1+"/all.txt", "r") as file:
                     # Read the contents of the file
@@ -58,9 +65,9 @@ class subrecon(BHunters):
             raise Exception(e)
             # result=[]
         return result,active
-                    
-    def scan(self,url):        
-        result,active=self.findusbcommand(url)
+
+    def scan(self,url,rate=None,concurrency=None):
+        result,active=self.findusbcommand(url,rate,concurrency)
         if result !=[]:
             return result,active
         return [],[]
@@ -97,11 +104,13 @@ class subrecon(BHunters):
                     if self.no_resolve_or_local_ip(host) == True:
                         new_document["resolve"] = False
                     collection.insert_one(new_document)
-                    task = Task({"type": "subdomain",
-                                        "stage": "takeover"})
-                    task.add_payload("domain", host)
-                    task.add_payload("source", "subrecon")
-                    self.send_task(task)
+                    # The host is recorded and *not* handed on.  The
+                    # legacy code published a "takeover" task for it,
+                    # and no worker in the fleet binds to that stage:
+                    # the task went to nobody, and a scan of a domain
+                    # with a thousand subdomains published a thousand
+                    # of them.  A host that does not answer is
+                    # recorded here, and a host that does is scanned.
             except Exception as e:
                 self.log.error("error happened ")
                 self.log.error(e)
@@ -133,6 +142,12 @@ class subrecon(BHunters):
         domain = task.payload_persistent["domain"]
         scanid = task.payload_persistent["scan_id"]
         scantype = task.payload_persistent["scantype"]
+        # The rate the scan allows against the target.  The discovery
+        # asks the target about every host it found, so it answers at
+        # the scan's rate.
+        persistent = task.payload_persistent or {}
+        rate = persistent.get("max_requests_per_second") or 5
+        concurrency = persistent.get("max_concurrency") or 3
         self.update_task_status(domain,"Started")
 
         try:
@@ -167,11 +182,11 @@ class subrecon(BHunters):
                 # host that was named, and the discovery tools that sit
                 # in this image are never run at all.
                 self.log.info("looking for the hosts of %s", domain)
-                result,active=self.scan(domain)
+                result,active=self.scan(domain,rate,concurrency)
                 self.log.info("the discovery found %d host(s), %d of them answering", len(result or []), len(active or []))
                 self.dispatch_discovered(result,active,scanid)
             else:
-                result,active=self.scan(domain)
+                result,active=self.scan(domain,rate,concurrency)
                 self.waitformongo()
                 db=self.db
                 self.dispatch_discovered(result,active,scanid)

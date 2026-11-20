@@ -90,12 +90,25 @@ def test_the_hosts_the_discovery_found_are_handed_to_the_fleet():
         "scanid",
     )
 
-    # Two takeover checks for the hosts that were named, and one scan
-    # for the host that answered.
-    assert len(worker.sent) == 3
-    stages = [task.headers["stage"] for task in worker.sent]
-    assert stages == ["takeover", "takeover", "new"]
-    assert worker.sent[-1].payload["subdomain"] == "api.demo.test"
+    # One task for the host that answered.  The host that was only
+    # named is recorded and not handed on: the legacy code published a
+    # "takeover" task for it, and no worker in the fleet binds to that
+    # stage, so the task went to nobody.
+    assert len(worker.sent) == 1
+    assert worker.sent[0].headers["stage"] == "new"
+    assert worker.sent[0].payload["subdomain"] == "api.demo.test"
+
+
+def test_a_host_that_nobody_consumes_is_not_published():
+    worker = _worker()
+
+    worker.dispatch_discovered(["shop.demo.test"], [], "scanid")
+
+    # The host is recorded - it was found - and no task is published
+    # for it.
+    assert worker.sent == []
+    domains = worker.db.collection("domains").inserted
+    assert [d["Domain"] for d in domains] == ["shop.demo.test"]
 
 
 def test_a_host_the_scan_excludes_is_not_handed_on():
